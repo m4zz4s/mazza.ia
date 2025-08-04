@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAZZA.AI - Professional Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .signal-buy { background: linear-gradient(90deg, rgba(0, 200, 83, 0.1) 0%, rgba(0, 200, 83, 0.05) 100%); border-left: 4px solid #00C853; }
+        .signal-sell { background: linear-gradient(90deg, rgba(255, 53, 71, 0.1) 0%, rgba(255, 53, 71, 0.05) 100%); border-left: 4px solid #FF3547; }
+        .signal-neutral { background: linear-gradient(90deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.05) 100%); border-left: 4px solid #2196F3; }
+        .timeframe-active { background-color: #4F46E5; color: white; }
+        .blink { animation: blink-animation 1.5s infinite; }
+        @keyframes blink-animation { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+        .signal-card { transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .signal-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
+        .grid-bg { background-image: linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px); background-size: 20px 20px; }
+        .tech-gradient { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
+        .glass-panel { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        @keyframes spin-slow { 100% { transform: rotate(360deg); } }
+        .animate-spin-slow { animation: spin-slow 2s linear infinite; }
+        .progress-bar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #4F46E5, #8B5CF6); width: 0%; transition: width 0.4s ease; }
+        .loading-step { opacity: 0.5; transition: opacity 0.3s ease; }
+        .loading-step.active { opacity: 1; }
+    </style>
+</head>
+<body class="tech-gradient text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header Técnico -->
+        <header class="flex justify-between items-center mb-10">
+            <div>
+                <h1 class="text-3xl font-bold text-white">
+                    <i class="fas fa-brain mr-3 text-cyan-400"></i>MAZZA.AI
+                </h1>
+                <p class="text-cyan-300">Professional Trading Intelligence Dashboard</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="glass-panel p-3 rounded-lg">
+                    <span class="text-cyan-300">System:</span>
+                    <span id="server-status" class="ml-2 font-medium text-green-400">
+                        <i class="fas fa-circle"></i> Online
+                    </span>
+                </div>
+                <div class="glass-panel p-3 rounded-lg">
+                    <span class="text-cyan-300">Last Update:</span>
+                    <span id="last-update" class="ml-2 font-medium">--:--:--</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Trading Signals ocupa toda a largura -->
+        <div class="glass-panel rounded-xl p-6 flex flex-col mb-8" style="min-height:600px;">
+            <h2 class="text-xl font-semibold mb-4 text-cyan-300 border-b border-cyan-800 pb-2">
+                <i class="fas fa-bolt mr-2 text-yellow-400"></i> Trading Signals
+            </h2>
+            <div class="mb-6 flex items-center justify-between">
+                <div>
+                    <div class="text-sm text-cyan-400 mb-2">Active Timeframes:</div>
+                    <div class="flex flex-wrap gap-2">
+                        <button class="timeframe-btn timeframe-active px-4 py-2 rounded-md text-sm" data-tf="2m">2m</button>
+                        <button class="timeframe-btn px-4 py-2 rounded-md text-sm" data-tf="5m">5m</button>
+                        <button class="timeframe-btn px-4 py-2 rounded-md text-sm" data-tf="15m">15m</button>
+                        <button class="timeframe-btn px-4 py-2 rounded-md text-sm" data-tf="1h">1h</button>
+                        <button class="timeframe-btn px-4 py-2 rounded-md text-sm" data-tf="4h">4h</button>
+                    </div>
+                </div>
+                <button id="analyze-btn" class="ml-4 px-6 py-2 rounded-md bg-cyan-700 hover:bg-cyan-800 text-white font-semibold shadow transition">
+                    <i class="fas fa-sync mr-2"></i>Atualizar
+                </button>
+            </div>
+            <div id="signals-container" class="space-y-4 flex-1 overflow-y-auto min-h-[400px] bg-gray-900/10 rounded-lg p-2"></div>
+        </div>
+
+        <!-- Tela de loading/análise melhorada -->
+        <div id="analyze-overlay" style="display:none; position:fixed; z-index:50; top:0; left:0; width:100vw; height:100vh; background:rgba(15,23,42,0.95);"
+             class="flex items-center justify-center">
+            <div class="w-full max-w-2xl glass-panel rounded-xl p-8 flex flex-col items-center">
+                <div class="relative w-32 h-32 mb-6">
+                    <!-- Esfera de processamento -->
+                    <div class="absolute inset-0 rounded-full bg-gradient-to-br from-cyan-400 via-blue-500 to-blue-900 shadow-2xl animate-spin-slow"></div>
+                    <div class="absolute inset-4 rounded-full bg-gradient-to-tl from-blue-900 via-cyan-700 to-cyan-400 opacity-70"></div>
+                    <div class="absolute inset-0 rounded-full bg-black opacity-10"></div>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <i class="fas fa-brain text-white text-4xl"></i>
+                    </div>
+                </div>
+                
+                <h2 class="text-2xl font-bold text-cyan-200 mb-4">Processando Análise de Mercado</h2>
+                
+                <div class="w-full mb-6">
+                    <div class="text-center text-cyan-300 mb-3" id="loading-message">Conectando ao servidor de IA...</div>
+                    
+                    <div class="progress-bar mb-1">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    
+                    <div class="text-right text-xs text-gray-400">
+                        <span id="progress-text">0%</span>
+                    </div>
+                </div>
+                
+                <div class="w-full grid grid-cols-4 gap-2 mb-4">
+                    <div class="loading-step active text-center p-3 rounded-lg">
+                        <div class="text-cyan-400 text-sm mb-1">1. Coleta</div>
+                        <i class="fas fa-download text-cyan-300"></i>
+                    </div>
+                    <div class="loading-step text-center p-3 rounded-lg">
+                        <div class="text-cyan-400 text-sm mb-1">2. Análise</div>
+                        <i class="fas fa-chart-line text-gray-400"></i>
+                    </div>
+                    <div class="loading-step text-center p-3 rounded-lg">
+                        <div class="text-cyan-400 text-sm mb-1">3. Predição</div>
+                        <i class="fas fa-robot text-gray-400"></i>
+                    </div>
+                    <div class="loading-step text-center p-3 rounded-lg">
+                        <div class="text-cyan-400 text-sm mb-1">4. Resultados</div>
+                        <i class="fas fa-check-circle text-gray-400"></i>
+                    </div>
+                </div>
+                
+                <div class="text-center text-gray-400 text-sm mt-4">
+                    <div class="mb-2">
+                        <i class="fas fa-shield-alt mr-2"></i>
+                        <span>Conexão segura com servidor de IA</span>
+                    </div>
+                    <div id="processing-details">Estabelecendo conexão criptografada...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Analytics embaixo, layout corrigido -->
+        <div class="glass-panel rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-cyan-300 border-b border-cyan-800 pb-2">
+                <i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>Performance Analytics
+            </h2>
+            <div class="flex flex-wrap gap-4 mb-4">
+                <div class="bg-gray-800/30 p-4 rounded-lg flex-1 min-w-[180px]">
+                    <div class="text-sm text-cyan-400 mb-1">Model Accuracy</div>
+                    <div class="text-2xl font-bold text-green-400 model-accuracy-value">78.3%</div>
+                    <div class="mt-2 w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                        <div class="bg-green-500 h-full model-accuracy-bar" style="width: 78.3%"></div>
+                    </div>
+                </div>
+                <div class="bg-gray-800/30 p-4 rounded-lg flex-1 min-w-[180px]">
+                    <div class="text-sm text-cyan-400 mb-1">Win Rate</div>
+                    <div class="text-2xl font-bold text-cyan-400 win-rate-value">68.5%</div>
+                    <div class="mt-2 w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                        <div class="bg-cyan-500 h-full win-rate-bar" style="width: 68.5%"></div>
+                    </div>
+                </div>
+                <div class="bg-gray-800/30 p-4 rounded-lg flex-1 min-w-[180px]">
+                    <div class="text-sm text-cyan-400 mb-1">Risk Level</div>
+                    <div class="text-2xl font-bold text-yellow-400 risk-level-value">Medium</div>
+                    <div class="mt-2 w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                        <div class="bg-yellow-500 h-full risk-level-bar" style="width: 55%"></div>
+                    </div>
+                </div>
+                <div class="bg-gray-800/30 p-4 rounded-lg flex-1 min-w-[180px]">
+                    <div class="text-sm text-cyan-400 mb-1">Sharpe Ratio</div>
+                    <div class="text-2xl font-bold text-purple-400 sharpe-ratio-value">1.86</div>
+                    <div class="mt-2 w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                        <div class="bg-purple-500 h-full sharpe-ratio-bar" style="width: 62%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="h-32 w-full">
+                <canvas id="performance-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- AI Predicted Entries embaixo da performance -->
+        <div class="glass-panel rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-cyan-300 border-b border-cyan-800 pb-2">
+                <i class="fas fa-robot mr-2 text-purple-400"></i>AI Predicted Entries
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="text-left text-cyan-400 text-sm">
+                            <th class="pb-2">Asset</th>
+                            <th class="pb-2">TF</th>
+                            <th class="pb-2">Time</th>
+                            <th class="pb-2">Type</th>
+                            <th class="pb-2">Conf</th>
+                            <th class="pb-2">Report</th>
+                        </tr>
+                    </thead>
+                    <tbody id="next-entries" class="text-sm">
+                        <tr class="border-b border-gray-700">
+                            <td class="py-2 font-medium">BTC/USDT</td>
+                            <td class="py-2">5m</td>
+                            <td class="py-2 font-mono">14:30</td>
+                            <td class="py-2"><span class="px-2 py-1 rounded text-xs font-medium bg-green-900 text-green-300">BUY</span></td>
+                            <td class="py-2 font-mono">85%</td>
+                            <td class="py-2"><button class="report-btn text-cyan-400 hover:text-cyan-300 text-sm"><i class="fas fa-file-alt"></i></button></td>
+                        </tr>
+                        <tr class="border-b border-gray-700">
+                            <td class="py-2 font-medium">ETH/USDT</td>
+                            <td class="py-2">15m</td>
+                            <td class="py-2 font-mono">14:45</td>
+                            <td class="py-2"><span class="px-2 py-1 rounded text-xs font-medium bg-blue-900 text-blue-300">HOLD</span></td>
+                            <td class="py-2 font-mono">72%</td>
+                            <td class="py-2"><button class="report-btn text-cyan-400 hover:text-cyan-300 text-sm"><i class="fas fa-file-alt"></i></button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-6">
+                <h3 class="text-lg font-semibold mb-3 text-cyan-300">
+                    <i class="fas fa-chart-line mr-2"></i>Market Indicators
+                </h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gray-800/30 p-3 rounded-lg">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-cyan-400">Fear & Greed</span>
+                            <span class="text-green-400 font-bold fear-greed-value">68</span>
+                        </div>
+                        <div class="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                            <div class="bg-green-500 h-full fear-greed-bar" style="width: 68%"></div>
+                        </div>
+                    </div>
+                    <div class="bg-gray-800/30 p-3 rounded-lg">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-cyan-400">Market Sentiment</span>
+                            <span class="text-cyan-400 font-bold market-sentiment-value">Neutral</span>
+                        </div>
+                        <div class="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                            <div class="bg-cyan-500 h-full market-sentiment-bar" style="width: 50%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráficos de Preço -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- BTC Chart -->
+            <div class="glass-panel rounded-xl p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-cyan-300">
+                        <i class="fab fa-bitcoin mr-2 text-orange-400"></i> BTC/USDT
+                    </h2>
+                    <div class="flex space-x-2">
+                        <button class="chart-type-btn bg-cyan-700 text-white px-3 py-1 rounded-md text-sm" data-type="candlestick">Candles</button>
+                        <button class="chart-type-btn px-3 py-1 rounded-md text-sm" data-type="line">Line</button>
+                        <button class="px-3 py-1 rounded-md text-sm bg-gray-700">
+                            <i class="fas fa-indicator"></i> Indicators
+                        </button>
+                    </div>
+                </div>
+                <div class="h-80">
+                    <canvas id="btc-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- ETH Chart -->
+            <div class="glass-panel rounded-xl p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-cyan-300">
+                        <i class="fab fa-ethereum mr-2 text-purple-400"></i> ETH/USDT
+                    </h2>
+                    <div class="flex space-x-2">
+                        <button class="chart-type-btn bg-cyan-700 text-white px-3 py-1 rounded-md text-sm" data-type="candlestick">Candles</button>
+                        <button class="chart-type-btn px-3 py-1 rounded-md text-sm" data-type="line">Line</button>
+                        <button class="px-3 py-1 rounded-md text-sm bg-gray-700">
+                            <i class="fas fa-indicator"></i> Indicators
+                        </button>
+                    </div>
+                </div>
+                <div class="h-80">
+                    <canvas id="eth-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Relatórios e Dados Técnicos -->
+        <div class="glass-panel rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-cyan-300 border-b border-cyan-800 pb-2">
+                <i class="fas fa-file-alt mr-2 text-yellow-400"></i>AI Decision Reports
+            </h2>
+            
+            <div id="ai-reports" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-gray-800/30 p-4 rounded-lg">
+                    <div class="flex items-center mb-3">
+                        <i class="fab fa-bitcoin text-orange-400 text-xl mr-2"></i>
+                        <h3 class="font-semibold">BTC 5m BUY Signal Analysis</h3>
+                    </div>
+                    <div class="text-sm text-gray-300 space-y-2">
+                        <p><span class="text-cyan-400">Pattern Recognition:</span> Bullish engulfing pattern detected on 5m timeframe</p>
+                        <p><span class="text-cyan-400">Technical Indicators:</span> 
+                            <ul class="list-disc list-inside ml-2">
+                                <li>RSI: 42 (approaching oversold)</li>
+                                <li>MACD: Bullish crossover confirmed</li>
+                                <li>Volume: 15% above average</li>
+                            </ul>
+                        </p>
+                        <p><span class="text-cyan-400">Market Sentiment:</span> 78% positive based on news analysis</p>
+                        <p><span class="text-cyan-400">Confidence Level:</span> High (82%)</p>
+                    </div>
+                </div>
+                
+                <div class="bg-gray-800/30 p-4 rounded-lg">
+                    <div class="flex items-center mb-3">
+                        <i class="fab fa-ethereum text-purple-400 text-xl mr-2"></i>
+                        <h3 class="font-semibold">ETH 15m HOLD Recommendation</h3>
+                    </div>
+                    <div class="text-sm text-gray-300 space-y-2">
+                        <p><span class="text-cyan-400">Market Conditions:</span> Sideways movement within key support/resistance levels</p>
+                        <p><span class="text-cyan-400">Technical Indicators:</span> 
+                            <ul class="list-disc list-inside ml-2">
+                                <li>RSI: 54 (neutral)</li>
+                                <li>Bollinger Bands: Price at middle band</li>
+                                <li>Volume: Declining</li>
+                            </ul>
+                        </p>
+                        <p><span class="text-cyan-400">On-Chain Data:</span> Exchange netflow negative (-12,500 ETH)</p>
+                        <p><span class="text-cyan-400">Confidence Level:</span> Moderate (65%)</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Corretoras de Futuros Disponíveis -->
+        <div class="glass-panel rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-cyan-300 border-b border-cyan-800 pb-2 flex items-center">
+                <i class="fas fa-exchange-alt mr-2 text-yellow-400"></i>
+                Corretoras de Futuros Disponíveis
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <a href="https://www.binance.com/en/futures/BTCUSDT" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/binance-coin-bnb-logo.png?v=026" alt="Binance" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Binance Futures</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +100</div>
+                    </div>
+                </a>
+                <a href="https://www.bybit.com/en-US/trade/usdt/BTCUSDT" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/bybit-bybit-logo.png?v=026" alt="Bybit" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Bybit</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +50</div>
+                    </div>
+                </a>
+                <a href="https://www.okx.com/markets/futures" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/okb-okb-logo.png?v=026" alt="OKX" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">OKX</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +80</div>
+                    </div>
+                </a>
+                <a href="https://futures.kucoin.com/trade/BTCUSDTM" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/kucoin-shares-kcs-logo.png?v=026" alt="KuCoin" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">KuCoin Futures</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +60</div>
+                    </div>
+                </a>
+                <a href="https://www.bitget.com/en/futures/btcusdt" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/bitget-token-bgb-logo.png?v=026" alt="Bitget" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Bitget</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +40</div>
+                    </div>
+                </a>
+                <a href="https://www.gate.io/futures_trade/BTC_USDT" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/gatechain-token-gt-logo.png?v=026" alt="Gate.io" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Gate.io</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +30</div>
+                    </div>
+                </a>
+                <a href="https://www.mexc.com/futures/overview" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/mexc-token-mexc-logo.png?v=026" alt="MEXC" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">MEXC</div>
+                        <div class="text-xs text-gray-400">BTC, ETH, +20</div>
+                    </div>
+                </a>
+                <a href="https://www.bitmex.com/app/trade/XBTUSD" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/bitmex-bmex-logo.png?v=026" alt="Bitmex" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Bitmex</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://www.deribit.com/main#/futures" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/deribit-deri-logo.png?v=026" alt="Deribit" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Deribit</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://phemex.com/contract/BTCUSD" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/phemex-phemex-logo.png?v=026" alt="Phemex" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Phemex</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://futures.kraken.com/" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/kraken-kraken-logo.png?v=026" alt="Kraken" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Kraken Futures</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://futures.htx.com/en-us/" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/huobi-token-ht-logo.png?v=026" alt="Huobi" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Huobi (HTX) Futures</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://www.coinex.com/futures" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/coinex-token-cet-logo.png?v=026" alt="CoinEx" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">CoinEx</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://www.bitfinex.com/derivatives" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://cryptologos.cc/logos/bitfinex-bfx-logo.png?v=026" alt="Bitfinex" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">Bitfinex Derivatives</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+                <a href="https://www.uppcoin.com/login/" target="_blank" class="flex items-center p-4 rounded-lg bg-gray-800/40 hover:bg-cyan-900/30 transition shadow signal-card">
+                    <img src="https://uppcoin.com/" alt="UppCoin" class="w-8 h-8 mr-3 rounded-full bg-white">
+                    <div>
+                        <div class="font-bold text-cyan-200">UppCoin</div>
+                        <div class="text-xs text-gray-400">BTC, ETH</div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===================== CONFIGURAÇÕES =====================
+        const TIMEFRAMES = ['2m', '5m', '15m', '1h', '4h'];
+        let currentTimeframe = '15m';
+        
+        // Mensagens de processo para tela de loading
+        const loadingMessages = [
+            "Conectando ao servidor de análise...",
+            "Coletando dados de mercado em tempo real...",
+            "Analisando padrões gráficos...",
+            "Processando indicadores técnicos...",
+            "Verificando sentimento do mercado...",
+            "Validando sinais com IA...",
+            "Otimizando pontos de entrada...",
+            "Preparando relatório final..."
+        ];
+        
+        const processingDetails = [
+            "Estabelecendo conexão criptografada...",
+            "Recebendo dados do Binance API...",
+            "Analisando 15.000 pontos de dados...",
+            "Executando modelo preditivo LSTM...",
+            "Validando resultados com rede neural...",
+            "Comparando com dados históricos...",
+            "Gerando relatório de confiança...",
+            "Finalizando processamento..."
+        ];
+
+        // ===================== GERADOR DE SINAIS DINÂMICOS =====================
+        function generateTimeBasedSignal(asset, timeframe) {
+            const now = new Date();
+            const minutes = now.getMinutes();
+            const timeframeMins = parseInt(timeframe);
+            const timeSlot = Math.floor(minutes / (isNaN(timeframeMins) ? 1 : timeframeMins)) % 4;
+
+            const signals = [
+                { type: 'BUY', strength: 'STRONG', confidence: 85 },
+                { type: 'SELL', strength: 'MODERATE', confidence: 70 },
+                { type: 'NEUTRAL', strength: '', confidence: 50 },
+                { type: 'BUY', strength: 'WEAK', confidence: 60 }
+            ];
+
+            const signal = signals[timeSlot];
+            const signalText = signal.strength ?
+                `${signal.type} ${signal.strength}` :
+                signal.type;
+
+            const priceBase = asset === 'BTC' ? 65000 : 3500;
+            const priceVariation = Math.sin(now.getTime() / 60000) * 500;
+            const price = (priceBase + priceVariation).toFixed(2);
+
+            const rsi = (40 + (timeSlot * 15)).toFixed(1);
+            const macd = (signal.type === 'BUY' ? 0.002 : -0.0015).toFixed(4);
+
+            // Horário de entrada e saída
+            const entrada = new Date(now);
+            let saida = new Date(now);
+            if (!isNaN(timeframeMins)) {
+                saida.setMinutes(entrada.getMinutes() + timeframeMins);
+            } else if (timeframe === '1h') {
+                saida.setHours(entrada.getHours() + 1);
+            } else if (timeframe === '4h') {
+                saida.setHours(entrada.getHours() + 4);
+            }
+
+            function formatTime(date) {
+                return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            }
+
+            return {
+                asset,
+                timeframe,
+                signal: signalText,
+                price: parseFloat(price),
+                confidence: signal.confidence,
+                rsi,
+                macd,
+                entrada: formatTime(entrada),
+                saida: formatTime(saida)
+            };
+        }
+
+        // Gera múltiplos horários de entrada/saída para cada timeframe
+        function generateMultipleSignals(asset, timeframe) {
+            const now = new Date();
+            let timeframeMins = parseInt(timeframe);
+            if (isNaN(timeframeMins)) {
+                if (timeframe === '1h') timeframeMins = 60;
+                else if (timeframe === '4h') timeframeMins = 240;
+                else timeframeMins = 1;
+            }
+
+            // Define o intervalo de geração de sinais para cada timeframe
+            let windowMinutes = 30;
+            if (timeframeMins === 2) windowMinutes = 30;
+            else if (timeframeMins === 5) windowMinutes = 50;
+            else if (timeframeMins === 15) windowMinutes = 90;
+            else if (timeframeMins === 60) windowMinutes = 180;
+            else if (timeframeMins === 240) windowMinutes = 480;
+
+            // Gera sinais para os últimos X minutos
+            const signals = [];
+            const signalsPerWindow = Math.floor(windowMinutes / timeframeMins);
+            for (let i = signalsPerWindow - 1; i >= 0; i--) {
+                const entrada = new Date(now);
+                entrada.setMinutes(now.getMinutes() - i * timeframeMins);
+                entrada.setSeconds(0, 0);
+                const saida = new Date(entrada);
+                saida.setMinutes(entrada.getMinutes() + timeframeMins);
+
+                // Reutiliza a lógica de força/confiança
+                const slot = Math.floor(entrada.getMinutes() / timeframeMins) % 4;
+                const signalTypes = [
+                    { type: 'BUY', strength: 'STRONG', confidence: 85 },
+                    { type: 'SELL', strength: 'MODERATE', confidence: 70 },
+                    { type: 'NEUTRAL', strength: '', confidence: 50 },
+                    { type: 'BUY', strength: 'WEAK', confidence: 60 }
+                ];
+                const signal = signalTypes[slot];
+                const signalText = signal.strength ? `${signal.type} ${signal.strength}` : signal.type;
+
+                const priceBase = asset === 'BTC' ? 65000 : 3500;
+                const priceVariation = Math.sin(entrada.getTime() / 60000) * 500;
+                const price = (priceBase + priceVariation).toFixed(2);
+
+                const rsi = (40 + (slot * 15)).toFixed(1);
+                const macd = (signal.type === 'BUY' ? 0.002 : -0.0015).toFixed(4);
+
+                function formatTime(date) {
+                    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                }
+
+                signals.push({
+                    asset,
+                    timeframe,
+                    signal: signalText,
+                    price: parseFloat(price),
+                    confidence: signal.confidence,
+                    rsi,
+                    macd,
+                    entrada: formatTime(entrada),
+                    saida: formatTime(saida)
+                });
+            }
+            return signals;
+        }
+
+        // ===================== GERADOR DE SINAIS FUTUROS =====================
+        function generateMultipleSignalsFuture(asset, timeframe) {
+            const now = new Date();
+            let timeframeMins = parseInt(timeframe);
+            if (isNaN(timeframeMins)) {
+                if (timeframe === '1h') timeframeMins = 60;
+                else if (timeframe === '4h') timeframeMins = 240;
+                else timeframeMins = 1;
+            }
+
+            // Define quantos sinais futuros gerar
+            const signalsCount = 8;
+            const signals = [];
+
+            for (let i = 0; i < signalsCount; i++) {
+                const entrada = new Date(now);
+                entrada.setMinutes(now.getMinutes() + i * timeframeMins);
+                entrada.setSeconds(0, 0);
+                
+                const saida = new Date(entrada);
+                saida.setMinutes(entrada.getMinutes() + timeframeMins);
+
+                // Gera sinal aleatório com tendência temporal
+                const timeSlot = i % 4;
+                const signalTypes = [
+                    { type: 'BUY', strength: 'STRONG', confidence: 80 + Math.floor(Math.random() * 10) },
+                    { type: 'SELL', strength: 'MODERATE', confidence: 70 + Math.floor(Math.random() * 10) },
+                    { type: 'NEUTRAL', strength: '', confidence: 50 + Math.floor(Math.random() * 10) },
+                    { type: 'BUY', strength: 'WEAK', confidence: 60 + Math.floor(Math.random() * 10) }
+                ];
+                
+                const signal = signalTypes[timeSlot];
+                const signalText = signal.strength ? 
+                    `${signal.type} ${signal.strength}` : 
+                    signal.type;
+
+                const priceBase = asset === 'BTC' ? 65000 : 3500;
+                const priceVariation = Math.sin(entrada.getTime() / 60000) * 500;
+                const price = (priceBase + priceVariation + (i * 50)).toFixed(2);
+
+                const rsi = (40 + (timeSlot * 15) + (i * 2)).toFixed(1);
+                const macd = (signal.type === 'BUY' ? 0.002 : -0.0015).toFixed(4);
+
+                function formatTime(date) {
+                    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                }
+
+                signals.push({
+                    asset,
+                    timeframe,
+                    signal: signalText,
+                    price: parseFloat(price),
+                    confidence: signal.confidence,
+                    rsi,
+                    macd,
+                    entrada: formatTime(entrada),
+                    saida: formatTime(saida)
+                });
+            }
+            return signals;
+        }
+
+        function updateActiveTimeframeSignalsFuture() {
+            const signalsContainer = document.getElementById('signals-container');
+            signalsContainer.innerHTML = '';
+            const btcSignals = generateMultipleSignalsFuture('BTC', currentTimeframe);
+            const ethSignals = generateMultipleSignalsFuture('ETH', currentTimeframe);
+            addSignalGroupCard('btc', btcSignals, currentTimeframe);
+            addSignalGroupCard('eth', ethSignals, currentTimeframe);
+            
+            // Atualiza o horário da última atualização
+            const now = new Date();
+            document.getElementById('last-update').textContent = 
+                now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        // Atualiza apenas o timeframe ativo mostrando múltiplos horários
+        function updateActiveTimeframeSignals() {
+            const signalsContainer = document.getElementById('signals-container');
+            signalsContainer.innerHTML = '';
+            const btcSignals = generateMultipleSignals('BTC', currentTimeframe);
+            const ethSignals = generateMultipleSignals('ETH', currentTimeframe);
+            addSignalGroupCard('btc', btcSignals, currentTimeframe);
+            addSignalGroupCard('eth', ethSignals, currentTimeframe);
+        }
+
+        // Mostra um card agrupando múltiplos horários para o mesmo ativo/timeframe
+        function addSignalGroupCard(asset, signals, timeframe) {
+            const cardId = `${asset}-signal-${timeframe.replace('m', '')}`;
+            let card = document.getElementById(cardId);
+
+            if (!card) {
+                card = document.createElement('div');
+                card.id = cardId;
+                card.className = `signal-card p-4 rounded-lg mb-4`;
+                document.getElementById('signals-container').appendChild(card);
+            }
+
+            // Usa o sinal mais recente para cor e destaque
+            const latest = signals[signals.length - 1];
+            const signalClass = latest.signal.includes('BUY') ?
+                'signal-buy' :
+                latest.signal.includes('SELL') ?
+                    'signal-sell' :
+                    'signal-neutral';
+
+            let iconHtml = '';
+            if (asset === 'btc') {
+                iconHtml = '<i class="fab fa-bitcoin text-orange-400 mr-2"></i>';
+            } else if (asset === 'eth') {
+                iconHtml = '<i class="fab fa-ethereum text-purple-400 mr-2"></i>';
+            }
+
+            card.className = `signal-card p-4 rounded-lg mb-4 ${signalClass} ${timeframe === currentTimeframe ? 'border-2 border-cyan-400' : ''}`;
+
+            card.innerHTML = `
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="text-lg font-bold flex items-center">
+                            ${iconHtml}
+                            ${asset.toUpperCase()}/USDT
+                            <span class="text-sm ml-2 bg-gray-800 px-2 py-1 rounded">${timeframe}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-xl font-bold">${latest.signal}</div>
+                        <div class="text-right text-sm mt-1">Confidence: <span class="font-mono">${latest.confidence}%</span></div>
+                    </div>
+                </div>
+                <div class="mt-3 text-xs text-gray-300">
+                    <table class="w-full">
+                        <thead>
+                            <tr>
+                                <th class="text-left font-semibold">Entrada</th>
+                                <th class="text-left font-semibold">Saída</th>
+                                <th class="text-left font-semibold">Preço</th>
+                                <th class="text-left font-semibold">RSI</th>
+                                <th class="text-left font-semibold">MACD</th>
+                                <th class="text-left font-semibold">Sinal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${signals.map(s => `
+                                <tr>
+                                    <td class="font-mono">${s.entrada}</td>
+                                    <td class="font-mono">${s.saida}</td>
+                                    <td class="font-mono">${s.price}</td>
+                                    <td>${s.rsi}</td>
+                                    <td>${s.macd}</td>
+                                    <td>${s.signal}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-2 bg-gray-800 h-2 rounded-full overflow-hidden">
+                    <div class="bg-cyan-500 h-full" style="width: ${latest.confidence}%"></div>
+                </div>
+            `;
+        }
+
+        // ===================== SISTEMA DE ATUALIZAÇÃO INTEGRADO =====================
+        function updateAllSections() {
+            updateActiveTimeframeSignalsFuture();
+            updatePerformanceAnalytics();
+            updateAIPredictedEntries();
+            updateAIReports();
+            updateCharts();
+            updateMarketIndicators();
+        }
+
+        // ===================== ATUALIZAÇÃO DE PERFORMANCE ANALYTICS =====================
+        function updatePerformanceAnalytics() {
+            const metrics = {
+                accuracy: 75 + Math.random() * 10,
+                winRate: 65 + Math.random() * 10,
+                riskLevel: ['Low', 'Medium', 'High'][Math.floor(Math.random() * 3)],
+                sharpeRatio: 1.5 + Math.random() * 0.5
+            };
+            
+            document.querySelector('.model-accuracy-value').textContent = `${metrics.accuracy.toFixed(1)}%`;
+            document.querySelector('.win-rate-value').textContent = `${metrics.winRate.toFixed(1)}%`;
+            document.querySelector('.risk-level-value').textContent = metrics.riskLevel;
+            document.querySelector('.sharpe-ratio-value').textContent = metrics.sharpeRatio.toFixed(2);
+            
+            // Atualiza barras de progresso
+            document.querySelector('.model-accuracy-bar').style.width = `${metrics.accuracy}%`;
+            document.querySelector('.win-rate-bar').style.width = `${metrics.winRate}%`;
+            document.querySelector('.risk-level-bar').style.width = metrics.riskLevel === 'Low' ? '30%' : metrics.riskLevel === 'Medium' ? '55%' : '80%';
+            document.querySelector('.sharpe-ratio-bar').style.width = `${(metrics.sharpeRatio - 1.5) * 200}%`;
+        }
+
+        // ===================== ATUALIZAÇÃO DE ENTRADAS PREDITAS PELA IA =====================
+        function updateAIPredictedEntries() {
+            const assets = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA'];
+            const timeframes = ['2m', '5m', '15m', '1h', '4h'];
+            const types = ['BUY', 'SELL', 'HOLD'];
+            
+            const entries = Array.from({length: 5}, () => {
+                const asset = assets[Math.floor(Math.random() * assets.length)];
+                const tf = timeframes[Math.floor(Math.random() * timeframes.length)];
+                const now = new Date();
+                const minutesOffset = Math.floor(Math.random() * 120);
+                const time = new Date(now.getTime() + minutesOffset * 60000);
+                
+                return {
+                    asset,
+                    tf,
+                    time: time.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}),
+                    type: types[Math.floor(Math.random() * types.length)],
+                    confidence: 70 + Math.floor(Math.random() * 26),
+                    report: '#'
+                };
+            });
+            
+            const tbody = document.getElementById('next-entries');
+            tbody.innerHTML = entries.map(entry => `
+                <tr class="border-b border-gray-700">
+                    <td class="py-2">${entry.asset}</td>
+                    <td class="py-2">${entry.tf}</td>
+                    <td class="py-2">${entry.time}</td>
+                    <td class="py-2">${entry.type}</td>
+                    <td class="py-2">${entry.confidence}%</td>
+                    <td class="py-2"><a href="${entry.report}" class="text-cyan-400 hover:underline">View</a></td>
+                </tr>
+            `).join('');
+        }
+
+        // ===================== ATUALIZAÇÃO DE RELATÓRIOS DE IA =====================
+        function updateAIReports() {
+            const reports = [
+                {
+                    asset: 'BTC',
+                    icon: 'fab fa-bitcoin text-orange-400',
+                    timeframe: ['2m', '5m', '15m', '1h'][Math.floor(Math.random() * 4)],
+                    signal: ['BUY', 'SELL', 'HOLD'][Math.floor(Math.random() * 3)],
+                    pattern: [
+                        "Bullish engulfing pattern detected",
+                        "Bearish divergence observed",
+                        "Double top formation",
+                        "Bull flag pattern identified"
+                    ][Math.floor(Math.random() * 4)],
+                    rsi: Math.floor(30 + Math.random() * 40),
+                    macd: (Math.random() > 0.5 ? '+' : '') + (Math.random() * 0.02).toFixed(4),
+                    volume: (Math.random() * 30 - 10).toFixed(1),
+                    sentiment: ["Positive", "Neutral", "Negative"][Math.floor(Math.random() * 3)],
+                    confidence: 70 + Math.floor(Math.random() * 21)
+                },
+                {
+                    asset: 'ETH',
+                    icon: 'fab fa-ethereum text-purple-400',
+                    timeframe: ['15m', '1h', '4h'][Math.floor(Math.random() * 3)],
+                    signal: ['BUY', 'SELL', 'HOLD'][Math.floor(Math.random() * 3)],
+                    pattern: [
+                        "Sideways channel consolidation",
+                        "Breakout above resistance",
+                        "Bearish MACD crossover",
+                        "Bullish RSI divergence"
+                    ][Math.floor(Math.random() * 4)],
+                    rsi: Math.floor(30 + Math.random() * 40),
+                    macd: (Math.random() > 0.5 ? '+' : '') + (Math.random() * 0.02).toFixed(4),
+                    volume: (Math.random() * 30 - 10).toFixed(1),
+                    sentiment: ["Positive", "Neutral", "Negative"][Math.floor(Math.random() * 3)],
+                    confidence: 70 + Math.floor(Math.random() * 21)
+                }
+            ];
+
+            const container = document.getElementById('ai-reports');
+            container.innerHTML = reports.map(report => `
+                <div class="bg-gray-800/30 p-4 rounded-lg">
+                    <div class="flex items-center mb-3">
+                        <i class="${report.icon} text-xl mr-2"></i>
+                        <h3 class="font-semibold">${report.asset} ${report.timeframe} ${report.signal} Signal Analysis</h3>
+                    </div>
+                    <div class="text-sm text-gray-300 space-y-2">
+                        <p><span class="text-cyan-400">Pattern Recognition:</span> ${report.pattern}</p>
+                        <p><span class="text-cyan-400">Technical Indicators:</span> 
+                            <ul class="list-disc list-inside ml-2">
+                                <li>RSI: ${report.rsi}</li>
+                                <li>MACD: ${report.macd}</li>
+                                <li>Volume: ${report.volume}% ${report.volume >= 0 ? 'above' : 'below'} average</li>
+                            </ul>
+                        </p>
+                        <p><span class="text-cyan-400">Market Sentiment:</span> ${report.sentiment}</p>
+                        <p><span class="text-cyan-400">Confidence Level:</span> ${report.confidence}%</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ===================== ATUALIZAÇÃO DE GRÁFICOS =====================
+        function updateCharts() {
+            const charts = ['btc-chart', 'eth-chart'];
+            charts.forEach(chartId => {
+                const canvas = document.getElementById(chartId);
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Destroi gráfico existente se houver
+                    if (window[chartId + '_instance']) {
+                        window[chartId + '_instance'].destroy();
+                    }
+                    
+                    // Cria novo gráfico com dados atualizados
+                    const newData = Array.from({length: 20}, () => Math.random() * 1000 + 50000);
+                    window[chartId + '_instance'] = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: Array.from({length: 20}, (_, i) => i + 1),
+                            datasets: [{
+                                label: 'Price',
+                                data: newData,
+                                borderColor: '#4F46E5',
+                                backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                y: { display: false },
+                                x: { display: false }
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        // ===================== ATUALIZAÇÃO DE INDICADORES DE MERCADO =====================
+        function updateMarketIndicators() {
+            const fearGreed = Math.floor(Math.random() * 100);
+            const sentiment = ["Extreme Fear", "Fear", "Neutral", "Greed", "Extreme Greed"][Math.floor(fearGreed / 20)];
+            
+            document.querySelector('.fear-greed-value').textContent = fearGreed;
+            document.querySelector('.market-sentiment-value').textContent = sentiment;
+            document.querySelector('.fear-greed-bar').style.width = `${fearGreed}%`;
+            document.querySelector('.market-sentiment-bar').style.width = `${(fearGreed + 20) % 100}%`;
+            
+            // Atualiza a cor da barra de progresso do Market Sentiment
+            const sentimentBar = document.querySelector('.market-sentiment-bar');
+            sentimentBar.className = 'h-full market-sentiment-bar';
+            
+            if (sentiment === "Extreme Fear") {
+                sentimentBar.classList.add('bg-red-600');
+            } else if (sentiment === "Fear") {
+                sentimentBar.classList.add('bg-yellow-500');
+            } else if (sentiment === "Neutral") {
+                sentimentBar.classList.add('bg-cyan-500');
+            } else if (sentiment === "Greed") {
+                sentimentBar.classList.add('bg-green-400');
+            } else if (sentiment === "Extreme Greed") {
+                sentimentBar.classList.add('bg-green-600');
+            }
+        }
+
+        // ===================== PROCESSO DE ATUALIZAÇÃO =====================
+        function simulateAIAnalysis() {
+            const overlay = document.getElementById('analyze-overlay');
+            const progressFill = document.getElementById('progress-fill');
+            const progressText = document.getElementById('progress-text');
+            const loadingMessage = document.getElementById('loading-message');
+            const processingDetailsEl = document.getElementById('processing-details');
+            const steps = document.querySelectorAll('.loading-step');
+            
+            overlay.style.display = 'flex';
+            progressFill.style.width = '0%';
+            progressText.textContent = '0%';
+            loadingMessage.textContent = loadingMessages[0];
+            processingDetailsEl.textContent = processingDetails[0];
+            
+            // Reset steps
+            steps.forEach((step, index) => {
+                step.classList.remove('active');
+                if (index === 0) step.classList.add('active');
+            });
+            
+            let progress = 0;
+            let currentStep = 0;
+            let messageIndex = 0;
+            let detailsIndex = 0;
+            
+            const interval = setInterval(() => {
+                // Atualiza progresso
+                progress += Math.floor(Math.random() * 8) + 2;
+                if (progress > 100) progress = 100;
+                
+                progressFill.style.width = `${progress}%`;
+                progressText.textContent = `${progress}%`;
+                
+                // Atualiza mensagens
+                if (progress > (messageIndex + 1) * 12) {
+                    messageIndex = Math.min(messageIndex + 1, loadingMessages.length - 1);
+                    loadingMessage.textContent = loadingMessages[messageIndex];
+                }
+                
+                // Atualiza detalhes técnicos
+                if (progress > (detailsIndex + 1) * 15) {
+                    detailsIndex = Math.min(detailsIndex + 1, processingDetails.length - 1);
+                    processingDetailsEl.textContent = processingDetails[detailsIndex];
+                }
+                
+                // Atualiza passos do processo
+                if (progress > 25 && currentStep < 1) {
+                    steps[0].classList.remove('active');
+                    steps[1].classList.add('active');
+                    currentStep = 1;
+                }
+                if (progress > 50 && currentStep < 2) {
+                    steps[1].classList.remove('active');
+                    steps[2].classList.add('active');
+                    currentStep = 2;
+                }
+                if (progress > 75 && currentStep < 3) {
+                    steps[2].classList.remove('active');
+                    steps[3].classList.add('active');
+                    currentStep = 3;
+                }
+                
+                // Finaliza quando chegar a 100%
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        overlay.style.display = 'none';
+                        updateAllSections();
+                    }, 500);
+                }
+            }, 150);
+        }
+
+        // ===================== INICIALIZAÇÃO =====================
+        document.addEventListener('DOMContentLoaded', () => {
+            // Inicializa todas as seções
+            updateAllSections();
+            
+            // Configura botões de timeframe
+            document.querySelectorAll('.timeframe-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.timeframe-btn').forEach(b => 
+                        b.classList.remove('timeframe-active', 'bg-cyan-700', 'text-white'));
+                    
+                    this.classList.add('timeframe-active', 'bg-cyan-700', 'text-white');
+                    currentTimeframe = this.dataset.tf;
+                    updateActiveTimeframeSignalsFuture();
+                });
+            });
+            
+            // Botão Atualizar
+            document.getElementById('analyze-btn').addEventListener('click', simulateAIAnalysis);
+            
+            // Inicializar gráficos (simplificado)
+            initCharts();
+        });
+
+        // ===================== GRÁFICOS (SIMPLIFICADO) =====================
+        function initCharts() {
+            // Implementação básica para demonstração
+            const charts = ['btc-chart', 'eth-chart'];
+            charts.forEach(chartId => {
+                const ctx = document.getElementById(chartId).getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: Array.from({length: 20}, (_, i) => i + 1),
+                        datasets: [{
+                            label: 'Price',
+                            data: Array.from({length: 20}, () => Math.random() * 1000 + 50000),
+                            borderColor: '#4F46E5',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: { display: false },
+                            x: { display: false }
+                        }
+                    }
+                });
+            });
+        }
+        
+
+    </script>
+</body>
+</html>
