@@ -245,6 +245,7 @@
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-semibold text-cyan-300">
                         <i class="fab fa-bitcoin mr-2 text-orange-400"></i> BTC/USDT
+                        <span id="btc-chart-price" class="chart-price ml-2">--.--</span>
                     </h2>
                     <div class="flex space-x-2">
                         <button class="chart-type-btn bg-cyan-700 text-white px-3 py-1 rounded-md text-sm" data-type="candlestick">Candles</button>
@@ -264,6 +265,7 @@
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-semibold text-cyan-300">
                         <i class="fab fa-ethereum mr-2 text-purple-400"></i> ETH/USDT
+                        <span id="eth-chart-price" class="chart-price ml-2">--.--</span>
                     </h2>
                     <div class="flex space-x-2">
                         <button class="chart-type-btn bg-cyan-700 text-white px-3 py-1 rounded-md text-sm" data-type="candlestick">Candles</button>
@@ -500,8 +502,32 @@
             "Finalizando processamento..."
         ];
 
+        // ===================== FUNÇÃO PARA BUSCAR PREÇOS EM TEMPO REAL =====================
+        async function fetchLivePrices() {
+            try {
+                // Usa a API pública do Binance para obter preços em tempo real
+                const btcResponse = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+                const ethResponse = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT');
+                
+                const btcData = await btcResponse.json();
+                const ethData = await ethResponse.json();
+                
+                return {
+                    BTC: parseFloat(btcData.price),
+                    ETH: parseFloat(ethData.price)
+                };
+            } catch (error) {
+                console.warn('Erro ao buscar preços em tempo real, usando valores padrão:', error);
+                // Fallback para valores padrão em caso de erro
+                return {
+                    BTC: 65000,
+                    ETH: 3500
+                };
+            }
+        }
+
         // ===================== GERADOR DE SINAIS DINÂMICOS =====================
-        function generateTimeBasedSignal(asset, timeframe) {
+        async function generateTimeBasedSignal(asset, timeframe) {
             const now = new Date();
             const minutes = now.getMinutes();
             const timeframeMins = parseInt(timeframe);
@@ -519,7 +545,8 @@
                 `${signal.type} ${signal.strength}` :
                 signal.type;
 
-            const priceBase = asset === 'BTC' ? 65000 : 3500;
+            const livePrices = await fetchLivePrices();
+            const priceBase = asset === 'BTC' ? livePrices.BTC : livePrices.ETH;
             const priceVariation = Math.sin(now.getTime() / 60000) * 500;
             const price = (priceBase + priceVariation).toFixed(2);
 
@@ -555,7 +582,7 @@
         }
 
         // Gera múltiplos horários de entrada/saída para cada timeframe
-        function generateMultipleSignals(asset, timeframe) {
+        async function generateMultipleSignals(asset, timeframe) {
             const now = new Date();
             let timeframeMins = parseInt(timeframe);
             if (isNaN(timeframeMins)) {
@@ -575,6 +602,10 @@
             // Gera sinais para os últimos X minutos
             const signals = [];
             const signalsPerWindow = Math.floor(windowMinutes / timeframeMins);
+            
+            // Busca preços em tempo real uma vez para todos os sinais
+            const livePrices = await fetchLivePrices();
+            
             for (let i = signalsPerWindow - 1; i >= 0; i--) {
                 const entrada = new Date(now);
                 entrada.setMinutes(now.getMinutes() - i * timeframeMins);
@@ -593,7 +624,7 @@
                 const signal = signalTypes[slot];
                 const signalText = signal.strength ? `${signal.type} ${signal.strength}` : signal.type;
 
-                const priceBase = asset === 'BTC' ? 65000 : 3500;
+                const priceBase = asset === 'BTC' ? livePrices.BTC : livePrices.ETH;
                 const priceVariation = Math.sin(entrada.getTime() / 60000) * 500;
                 const price = (priceBase + priceVariation).toFixed(2);
 
@@ -620,7 +651,7 @@
         }
 
         // ===================== GERADOR DE SINAIS FUTUROS =====================
-        function generateMultipleSignalsFuture(asset, timeframe) {
+        async function generateMultipleSignalsFuture(asset, timeframe) {
             const now = new Date();
             let timeframeMins = parseInt(timeframe);
             if (isNaN(timeframeMins)) {
@@ -632,6 +663,9 @@
             // Define quantos sinais futuros gerar
             const signalsCount = 8;
             const signals = [];
+
+            // Busca preços em tempo real uma vez para todos os sinais
+            const livePrices = await fetchLivePrices();
 
             for (let i = 0; i < signalsCount; i++) {
                 const entrada = new Date(now);
@@ -655,7 +689,7 @@
                     `${signal.type} ${signal.strength}` : 
                     signal.type;
 
-                const priceBase = asset === 'BTC' ? 65000 : 3500;
+                const priceBase = asset === 'BTC' ? livePrices.BTC : livePrices.ETH;
                 const priceVariation = Math.sin(entrada.getTime() / 60000) * 500;
                 const price = (priceBase + priceVariation + (i * 50)).toFixed(2);
 
@@ -681,11 +715,11 @@
             return signals;
         }
 
-        function updateActiveTimeframeSignalsFuture() {
+        async function updateActiveTimeframeSignalsFuture() {
             const signalsContainer = document.getElementById('signals-container');
             signalsContainer.innerHTML = '';
-            const btcSignals = generateMultipleSignalsFuture('BTC', currentTimeframe);
-            const ethSignals = generateMultipleSignalsFuture('ETH', currentTimeframe);
+            const btcSignals = await generateMultipleSignalsFuture('BTC', currentTimeframe);
+            const ethSignals = await generateMultipleSignalsFuture('ETH', currentTimeframe);
             addSignalGroupCard('btc', btcSignals, currentTimeframe);
             addSignalGroupCard('eth', ethSignals, currentTimeframe);
             
@@ -696,11 +730,11 @@
         }
 
         // Atualiza apenas o timeframe ativo mostrando múltiplos horários
-        function updateActiveTimeframeSignals() {
+        async function updateActiveTimeframeSignals() {
             const signalsContainer = document.getElementById('signals-container');
             signalsContainer.innerHTML = '';
-            const btcSignals = generateMultipleSignals('BTC', currentTimeframe);
-            const ethSignals = generateMultipleSignals('ETH', currentTimeframe);
+            const btcSignals = await generateMultipleSignals('BTC', currentTimeframe);
+            const ethSignals = await generateMultipleSignals('ETH', currentTimeframe);
             addSignalGroupCard('btc', btcSignals, currentTimeframe);
             addSignalGroupCard('eth', ethSignals, currentTimeframe);
         }
@@ -740,6 +774,7 @@
                         <div class="text-lg font-bold flex items-center">
                             ${iconHtml}
                             ${asset.toUpperCase()}/USDT
+                            <span class="live-price ml-2 text-cyan-300">${latest.price.toFixed(2)}</span>
                             <span class="text-sm ml-2 bg-gray-800 px-2 py-1 rounded">${timeframe}</span>
                         </div>
                     </div>
@@ -781,8 +816,8 @@
         }
 
         // ===================== SISTEMA DE ATUALIZAÇÃO INTEGRADO =====================
-        function updateAllSections() {
-            updateActiveTimeframeSignalsFuture();
+        async function updateAllSections() {
+            await updateActiveTimeframeSignalsFuture();
             updatePerformanceAnalytics();
             updateAIPredictedEntries();
             updateAIReports();
@@ -1046,28 +1081,28 @@
                 // Finaliza quando chegar a 100%
                 if (progress >= 100) {
                     clearInterval(interval);
-                    setTimeout(() => {
+                    setTimeout(async () => {
                         overlay.style.display = 'none';
-                        updateAllSections();
+                        await updateAllSections();
                     }, 500);
                 }
             }, 150);
         }
 
         // ===================== INICIALIZAÇÃO =====================
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             // Inicializa todas as seções
-            updateAllSections();
+            await updateAllSections();
             
             // Configura botões de timeframe
             document.querySelectorAll('.timeframe-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
+                btn.addEventListener('click', async function() {
                     document.querySelectorAll('.timeframe-btn').forEach(b => 
                         b.classList.remove('timeframe-active', 'bg-cyan-700', 'text-white'));
                     
                     this.classList.add('timeframe-active', 'bg-cyan-700', 'text-white');
                     currentTimeframe = this.dataset.tf;
-                    updateActiveTimeframeSignalsFuture();
+                    await updateActiveTimeframeSignalsFuture();
                 });
             });
             
@@ -1076,6 +1111,30 @@
             
             // Inicializar gráficos (simplificado)
             initCharts();
+            
+            // ===================== ATUALIZAÇÃO PERIÓDICA DE PREÇOS =====================
+            async function updateLivePrices() {
+                const prices = await fetchLivePrices();
+                
+                // Atualizar os preços nos cards de sinal
+                document.querySelectorAll('.signal-card').forEach(card => {
+                    const asset = card.id.includes('btc') ? 'BTC' : 'ETH';
+                    const priceElement = card.querySelector('.live-price');
+                    if (priceElement) {
+                        priceElement.textContent = prices[asset].toFixed(2);
+                    }
+                });
+                
+                // Atualizar os gráficos (opcional)
+                document.querySelectorAll('.chart-price').forEach(el => {
+                    const asset = el.id.includes('btc') ? 'BTC' : 'ETH';
+                    el.textContent = `${prices[asset].toFixed(2)} USDT`;
+                });
+            }
+
+            // Atualizar a cada 10 segundos
+            setInterval(updateLivePrices, 10000);
+            updateLivePrices(); // Executar imediatamente ao carregar
         });
 
         // ===================== GRÁFICOS (SIMPLIFICADO) =====================
